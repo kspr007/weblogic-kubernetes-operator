@@ -20,7 +20,7 @@ fi
 
 scriptDir=`cd "$(dirname "$0")" > /dev/null 2>&1 ; pwd -P`
 
-CERT_DIR="${script_dir}/weblogic-operator-cert"
+CERT_DIR="${scriptDir}/weblogic-operator-cert"
 OP_PREFIX="weblogic-operator"
 OP_CERT_PEM="${CERT_DIR}/${OP_PREFIX}.cert.pem"
 OP_KEY_PEM="${CERT_DIR}/${OP_PREFIX}.key.pem"
