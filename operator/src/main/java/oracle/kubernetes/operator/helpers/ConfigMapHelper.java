@@ -71,11 +71,10 @@ public class ConfigMapHelper {
           "  cp /shared/domain/$3/bin/startNodeManager.sh ${srvr_nmdir}\n" +
           "\n" +
           "  # Edit the start nodemanager script to use the home for the server\n" +
-          "  sed -i -e \"s:/shared/domain/$3/nodemanager:/u01/nodemanager:g\" /startNodeManager.sh\n" +
+          "  sed -i -e \"s:/shared/domain/$3/nodemanager:/u01/nodemanager:g\" ${srvr_nmdir}/startNodeManager.sh\n" +
           "\n" +
           "  # Create startup.properties file\n" +
           "  datadir=${DOMAIN_HOME}/servers/$2/data/nodemanager\n" +
-//          "  nmdir=${DOMAIN_HOME}/nodemgr_home\n" +
           "  stateFile=${datadir}/$2.state\n" +
           "  startProp=${datadir}/startup.properties\n" +
           "  if [ -f \"$startProp\" ]; then\n" +
@@ -103,15 +102,15 @@ public class ConfigMapHelper {
           "  echo \"NMHostName=$1-$2\" >> ${startProp}\n" +
           "}\n" +
           "\n" +
-          "# Base64 decode binary support files" +
-          "mkdir -p /tmp/weblogic-operator/bin" +
-          "shopt -s nullglob" +
-          "for f in /weblogic-operator/scripts/*.base64; do" +
-          "  cat \"\\$f\" | base64 --decode > /tmp/weblogic-operator/bin/\\$(basename \"\\$f\" .base64)" +
-          "done" +
+          "# Base64 decode binary support files\n" +
+          "mkdir -p /tmp/weblogic-operator/bin\n" +
+          "shopt -s nullglob\n" +
+          "for f in /weblogic-operator/scripts/*.base64; do\n" +
+          "  cat \"$f\" | base64 --decode > /tmp/weblogic-operator/bin/$(basename \"$f\" .base64)\n" +
+          "done\n" +
           "\n" +
           "# Check for stale state file and remove if found\"\n" +
-          "if [ -f ${stateFile} ]; then\n" +
+          "if [ -f \"${stateFile}\" ]; then\n" +
           "  echo \"Removing stale file ${stateFile}\"\n" +
           "  rm ${stateFile}\n" +
           "fi\n" +
@@ -126,8 +125,8 @@ public class ConfigMapHelper {
           "sed -i -e \"s:ListenAddress=.*:ListenAddress=$1-$2:g\" /u01/nodemanager/nodemanager.properties\n" +
           "sed -i -e \"s:LogFile=.*:LogFile=/shared/logs/nodemanager-$2.log:g\" /u01/nodemanager/nodemanager.properties\n" +
           "\n" +
-          "# Edit the nodemanager properties file to make the listener impl pluggable" +
-          "echo \"RestEnabled=true\" >> ${prop}" +
+          "# Edit the nodemanager properties file to make the listener impl pluggable\n" +
+          "echo \"RestEnabled=true\" >> /u01/nodemanager/nodemanager.properties\n" +
           "\n" +
           "export JAVA_PROPERTIES=\"-DLogFile=/shared/logs/nodemanager-$server_name.log -DNodeManagerHome=/u01/nodemanager\"\n" +
           "export NODEMGR_HOME=\"/u01/nodemanager\"\n" +
@@ -143,11 +142,16 @@ public class ConfigMapHelper {
           "  createServerScriptsProperties $domain_uid $server_name $domain_name\n" +
           "fi\n" +
           "\n" +
-          "if [ -f /tmp/weblogic-operator/bin/headless-nodemanager.jar ]; then" +
-          "  echo \"Start the headless nodemanager and server instance\"" +
-          "  export PRE_CLASSPATH=/tmp/weblogic-operator/bin/headless-nodemanager.jar" +
-          "  . ${NODEMGR_HOME}/startNodeManager.sh &" +
-          "else" +
+          "if [ -f /tmp/weblogic-operator/bin/headless-nodemanager.jar ]; then\n" +
+          "  echo \"Start the headless nodemanager and server instance\"\n" +
+          "  if [ -n \"$4\" ]; then\n" +
+          "    echo \"Create boot.properties for managed server\"\n" +
+          "    wlst.sh -skipWLSModuleScanning /weblogic-operator/scripts/start-server.py $domain_uid $server_name $domain_name $admin_server_t3_url\n" +
+          "  fi\n" +
+          "  \n" +
+          "  export PRE_CLASSPATH=/tmp/weblogic-operator/bin/headless-nodemanager.jar\n" +
+          "  . ${NODEMGR_HOME}/startNodeManager.sh &\n" +
+          "else\n" +
           "  echo \"Start the nodemanager\"\n" +
           "  . ${NODEMGR_HOME}/startNodeManager.sh &\n" +
           "  \n" +
@@ -166,12 +170,11 @@ public class ConfigMapHelper {
           "  echo \"Start the server\"\n" +
           "  wlst.sh -skipWLSModuleScanning /weblogic-operator/scripts/start-server.py $domain_uid $server_name $domain_name $admin_server_t3_url\n" +
           "  \n" +
-          "fi" +
+          "fi\n" +
           "echo \"Wait indefinitely so that the Kubernetes pod does not exit and try to restart\"\n" +
           "while true; do sleep 60; done\n";
 
   private static final String START_SERVER_PYTHON_SCRIPT = "import sys;\n" +
-          "#\n" +
           "# +++ Start of common code for reading domain secrets\n" +
           "\n" +
           "# Read username secret\n" +
@@ -226,41 +229,41 @@ public class ConfigMapHelper {
           "\n" +
           "service_name = domain_uid + \"-\" + server_name\n" +
           "\n" +
-          "# Update node manager listen address\n" +
-          "if admin_server_url is not None:\n" +
-          "  connect(admin_username, admin_password, admin_server_url)\n" +
-          "  serverConfig()\n" +
-          "  server=cmo.lookupServer(server_name)\n" +
-          "  machineName=server.getMachine().getName()\n" +
-          "  print 'Name of machine assigned to server %s is %s' % (server_name, machineName)\n" +
-          "\n" +
-          "  if machineName is not None:\n" +
-          "    print 'Updating listen address of machine %s' % machineName\n" +
-          "    try:\n" +
-          "      edit()\n" +
-          "      startEdit(120000, 120000, 'true')\n" +
-          "      cd('/')\n" +
-          "      machine=cmo.lookupMachine(machineName)\n" +
-          "      print 'Machine is %s' % machine\n" +
-          "      nm=machine.getNodeManager()\n" +
-          "      nm.setListenAddress(service_name)\n" +
-          "      nm.setNMType('Plain')\n" +
-          "      save()\n" +
-          "      activate()\n" +
-          "      print 'Updated listen address of machine %s to %s' % (machineName, service_name)\n" +
-          "    except:\n" +
-          "      cancelEdit('y')\n" +
-          "  disconnect()\n" +
-          "\n" +
-          "# Connect to nodemanager and start server\n" +
-          "try:\n" +
-          "  nmConnect(admin_username, admin_password, service_name,  '5556', domain_name, domain_path, 'plain')\n" +
-          "  nmStart(server_name)\n" +
-          "  nmDisconnect()\n" +
-          "except WLSTException, e:\n" +
-          "  nmDisconnect()\n" +
-          "  print e\n" +
-          "\n" +
+//          "# Update node manager listen address\n" +
+//          "if admin_server_url is not None:\n" +
+//          "  connect(admin_username, admin_password, admin_server_url)\n" +
+//          "  serverConfig()\n" +
+//          "  server=cmo.lookupServer(server_name)\n" +
+//          "  machineName=server.getMachine().getName()\n" +
+//          "  print 'Name of machine assigned to server %s is %s' % (server_name, machineName)\n" +
+//          "\n" +
+//          "  if machineName is not None:\n" +
+//          "    print 'Updating listen address of machine %s' % machineName\n" +
+//          "    try:\n" +
+//          "      edit()\n" +
+//          "      startEdit(120000, 120000, 'true')\n" +
+//          "      cd('/')\n" +
+//          "      machine=cmo.lookupMachine(machineName)\n" +
+//          "      print 'Machine is %s' % machine\n" +
+//          "      nm=machine.getNodeManager()\n" +
+//          "      nm.setListenAddress(service_name)\n" +
+//          "      nm.setNMType('Plain')\n" +
+//          "      save()\n" +
+//          "      activate()\n" +
+//          "      print 'Updated listen address of machine %s to %s' % (machineName, service_name)\n" +
+//          "    except:\n" +
+//          "      cancelEdit('y')\n" +
+//          "  disconnect()\n" +
+//          "\n" +
+//          "# Connect to nodemanager and start server\n" +
+//          "try:\n" +
+//          "  nmConnect(admin_username, admin_password, service_name,  '5556', domain_name, domain_path, 'plain')\n" +
+//          "  nmStart(server_name)\n" +
+//          "  nmDisconnect()\n" +
+//          "except WLSTException, e:\n" +
+//          "  nmDisconnect()\n" +
+//          "  print e\n" +
+//          "\n" +
           "# Exit WLST\n" +
           "exit()\n";
 
