@@ -3,6 +3,11 @@
 
 package oracle.kubernetes.operator.helpers;
 
+import java.io.File;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.util.Base64;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -70,7 +75,7 @@ public class ConfigMapHelper {
           "\n" +
           "  # Create startup.properties file\n" +
           "  datadir=${DOMAIN_HOME}/servers/$2/data/nodemanager\n" +
-          "  nmdir=${DOMAIN_HOME}/nodemgr_home\n" +
+//          "  nmdir=${DOMAIN_HOME}/nodemgr_home\n" +
           "  stateFile=${datadir}/$2.state\n" +
           "  startProp=${datadir}/startup.properties\n" +
           "  if [ -f \"$startProp\" ]; then\n" +
@@ -98,6 +103,13 @@ public class ConfigMapHelper {
           "  echo \"NMHostName=$1-$2\" >> ${startProp}\n" +
           "}\n" +
           "\n" +
+          "# Base64 decode binary support files" +
+          "mkdir -p /tmp/weblogic-operator/bin" +
+          "shopt -s nullglob" +
+          "for f in /weblogic-operator/scripts/*.base64; do" +
+          "  cat \"\\$f\" | base64 --decode > /tmp/weblogic-operator/bin/\\$(basename \"\\$f\" .base64)" +
+          "done" +
+          "\n" +
           "# Check for stale state file and remove if found\"\n" +
           "if [ -f ${stateFile} ]; then\n" +
           "  echo \"Removing stale file ${stateFile}\"\n" +
@@ -114,6 +126,9 @@ public class ConfigMapHelper {
           "sed -i -e \"s:ListenAddress=.*:ListenAddress=$1-$2:g\" /u01/nodemanager/nodemanager.properties\n" +
           "sed -i -e \"s:LogFile=.*:LogFile=/shared/logs/nodemanager-$2.log:g\" /u01/nodemanager/nodemanager.properties\n" +
           "\n" +
+          "# Edit the nodemanager properties file to make the listener impl pluggable" +
+          "echo \"RestEnabled=true\" >> ${prop}" +
+          "\n" +
           "export JAVA_PROPERTIES=\"-DLogFile=/shared/logs/nodemanager-$server_name.log -DNodeManagerHome=/u01/nodemanager\"\n" +
           "export NODEMGR_HOME=\"/u01/nodemanager\"\n" +
           "\n" +
@@ -128,24 +143,30 @@ public class ConfigMapHelper {
           "  createServerScriptsProperties $domain_uid $server_name $domain_name\n" +
           "fi\n" +
           "\n" +
-          "echo \"Start the nodemanager\"\n" +
-          ". ${NODEMGR_HOME}/startNodeManager.sh &\n" +
-          "\n" +
-          "echo \"Allow the nodemanager some time to start before attempting to connect\"\n" +
-          "sleep 15\n" +
-          "echo \"Finished waiting for the nodemanager to start\"\n" +
-          "\n" +
-          "echo \"Update JVM arguments\"\n" +
-          "echo \"Arguments=${USER_MEM_ARGS} -XX\\:+UnlockExperimentalVMOptions -XX\\:+UseCGroupMemoryLimitForHeap ${JAVA_OPTIONS}\" >> ${startProp}\n" +
-          "\n" +
-          "admin_server_t3_url=\n" +
-          "if [ -n \"$4\" ]; then\n" +
-          "  admin_server_t3_url=t3://$domain_uid-$as_name:$as_port\n" +
-          "fi\n" +
-          "\n" +
-          "echo \"Start the server\"\n" +
-          "wlst.sh -skipWLSModuleScanning /weblogic-operator/scripts/start-server.py $domain_uid $server_name $domain_name $admin_server_t3_url\n" +
-          "\n" +
+          "if [ -f /tmp/weblogic-operator/bin/headless-nodemanager.jar ]; then" +
+          "  echo \"Start the headless nodemanager and server instance\"" +
+          "  export PRE_CLASSPATH=/tmp/weblogic-operator/bin/headless-nodemanager.jar" +
+          "  . ${NODEMGR_HOME}/startNodeManager.sh &" +
+          "else" +
+          "  echo \"Start the nodemanager\"\n" +
+          "  . ${NODEMGR_HOME}/startNodeManager.sh &\n" +
+          "  \n" +
+          "  echo \"Allow the nodemanager some time to start before attempting to connect\"\n" +
+          "  sleep 15\n" +
+          "  echo \"Finished waiting for the nodemanager to start\"\n" +
+          "  \n" +
+          "  echo \"Update JVM arguments\"\n" +
+          "  echo \"Arguments=${USER_MEM_ARGS} -XX\\:+UnlockExperimentalVMOptions -XX\\:+UseCGroupMemoryLimitForHeap ${JAVA_OPTIONS}\" >> ${startProp}\n" +
+          "  \n" +
+          "  admin_server_t3_url=\n" +
+          "  if [ -n \"$4\" ]; then\n" +
+          "    admin_server_t3_url=t3://$domain_uid-$as_name:$as_port\n" +
+          "  fi\n" +
+          "  \n" +
+          "  echo \"Start the server\"\n" +
+          "  wlst.sh -skipWLSModuleScanning /weblogic-operator/scripts/start-server.py $domain_uid $server_name $domain_name $admin_server_t3_url\n" +
+          "  \n" +
+          "fi" +
           "echo \"Wait indefinitely so that the Kubernetes pod does not exit and try to restart\"\n" +
           "while true; do sleep 60; done\n";
 
@@ -416,6 +437,12 @@ public class ConfigMapHelper {
           "cat ${STATEFILE} | cut -f 1 -d ':'\n" +
           "exit 0");
 
+      try {
+        data.put("headless-nodemanager.jar.base64", toBase64("/operator/bin/headless-nodemanager.jar"));
+      } catch (IOException e1) {
+        return doTerminate(e1, packet);
+      }
+      
       cm.setData(data);
       
       CallBuilderFactory factory = ContainerResolver.getInstance().getContainer().getSPI(CallBuilderFactory.class);
@@ -484,4 +511,9 @@ public class ConfigMapHelper {
     }
   }
 
+  private static String toBase64(String fileName) throws IOException {
+    File file = new File(fileName);
+    byte[] encoded = Base64.getEncoder().encode(Files.readAllBytes(file.toPath()));
+    return new String(encoded, StandardCharsets.UTF_8);
+  }
 }
