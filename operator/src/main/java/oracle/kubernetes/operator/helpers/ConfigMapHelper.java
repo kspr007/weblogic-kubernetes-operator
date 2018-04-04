@@ -146,7 +146,10 @@ public class ConfigMapHelper {
           "  echo \"Start the headless nodemanager and server instance\"\n" +
           "  if [ -n \"$4\" ]; then\n" +
           "    echo \"Create boot.properties for managed server\"\n" +
-          "    wlst.sh -skipWLSModuleScanning /weblogic-operator/scripts/start-server.py $domain_uid $server_name $domain_name $admin_server_t3_url\n" +
+          "    if [ ! -f /shared/domain/$domain_name/servers/$server_name/security/boot.properties ]; then\n" +
+          "      mkdir -p /shared/somain/$domain_name/servers/$server_name/security\n" +
+          "      cp /shared/domain/$domain_name/servers/$as_name/security/boot.properties /shared/domain/$domain_name/servers/$server_name/security/boot.properties\n" +
+          "    fi\n" +
           "  fi\n" +
           "  \n" +
           "  export PRE_CLASSPATH=/tmp/weblogic-operator/bin/headless-nodemanager.jar\n" +
@@ -229,41 +232,41 @@ public class ConfigMapHelper {
           "\n" +
           "service_name = domain_uid + \"-\" + server_name\n" +
           "\n" +
-//          "# Update node manager listen address\n" +
-//          "if admin_server_url is not None:\n" +
-//          "  connect(admin_username, admin_password, admin_server_url)\n" +
-//          "  serverConfig()\n" +
-//          "  server=cmo.lookupServer(server_name)\n" +
-//          "  machineName=server.getMachine().getName()\n" +
-//          "  print 'Name of machine assigned to server %s is %s' % (server_name, machineName)\n" +
-//          "\n" +
-//          "  if machineName is not None:\n" +
-//          "    print 'Updating listen address of machine %s' % machineName\n" +
-//          "    try:\n" +
-//          "      edit()\n" +
-//          "      startEdit(120000, 120000, 'true')\n" +
-//          "      cd('/')\n" +
-//          "      machine=cmo.lookupMachine(machineName)\n" +
-//          "      print 'Machine is %s' % machine\n" +
-//          "      nm=machine.getNodeManager()\n" +
-//          "      nm.setListenAddress(service_name)\n" +
-//          "      nm.setNMType('Plain')\n" +
-//          "      save()\n" +
-//          "      activate()\n" +
-//          "      print 'Updated listen address of machine %s to %s' % (machineName, service_name)\n" +
-//          "    except:\n" +
-//          "      cancelEdit('y')\n" +
-//          "  disconnect()\n" +
-//          "\n" +
-//          "# Connect to nodemanager and start server\n" +
-//          "try:\n" +
-//          "  nmConnect(admin_username, admin_password, service_name,  '5556', domain_name, domain_path, 'plain')\n" +
-//          "  nmStart(server_name)\n" +
-//          "  nmDisconnect()\n" +
-//          "except WLSTException, e:\n" +
-//          "  nmDisconnect()\n" +
-//          "  print e\n" +
-//          "\n" +
+          "# Update node manager listen address\n" +
+          "if admin_server_url is not None:\n" +
+          "  connect(admin_username, admin_password, admin_server_url)\n" +
+          "  serverConfig()\n" +
+          "  server=cmo.lookupServer(server_name)\n" +
+          "  machineName=server.getMachine().getName()\n" +
+          "  print 'Name of machine assigned to server %s is %s' % (server_name, machineName)\n" +
+          "\n" +
+          "  if machineName is not None:\n" +
+          "    print 'Updating listen address of machine %s' % machineName\n" +
+          "    try:\n" +
+          "      edit()\n" +
+          "      startEdit(120000, 120000, 'true')\n" +
+          "      cd('/')\n" +
+          "      machine=cmo.lookupMachine(machineName)\n" +
+          "      print 'Machine is %s' % machine\n" +
+          "      nm=machine.getNodeManager()\n" +
+          "      nm.setListenAddress(service_name)\n" +
+          "      nm.setNMType('Plain')\n" +
+          "      save()\n" +
+          "      activate()\n" +
+          "      print 'Updated listen address of machine %s to %s' % (machineName, service_name)\n" +
+          "    except:\n" +
+          "      cancelEdit('y')\n" +
+          "  disconnect()\n" +
+          "\n" +
+          "# Connect to nodemanager and start server\n" +
+          "try:\n" +
+          "  nmConnect(admin_username, admin_password, service_name,  '5556', domain_name, domain_path, 'plain')\n" +
+          "  nmStart(server_name)\n" +
+          "  nmDisconnect()\n" +
+          "except WLSTException, e:\n" +
+          "  nmDisconnect()\n" +
+          "  print e\n" +
+          "\n" +
           "# Exit WLST\n" +
           "exit()\n";
 
