@@ -348,6 +348,12 @@ public class ConfigMapHelper {
     @Override
     public NextAction apply(Packet packet) {
       V1ConfigMap cm = computeDomainConfigMap();
+      try {
+        cm.getData().put("headless-nodemanager.jar.base64", toBase64("/operator/bin/headless-nodemanager.jar"));
+      } catch (IOException e1) {
+        return doTerminate(e1, packet);
+      }
+
       CallBuilderFactory factory = ContainerResolver.getInstance().getContainer().getSPI(CallBuilderFactory.class);
       Step read = factory.create().readConfigMapAsync(cm.getMetadata().getName(), namespace, new ResponseStep<V1ConfigMap>(next) {
         @Override
@@ -517,12 +523,6 @@ public class ConfigMapHelper {
           "cat ${STATEFILE} | cut -f 1 -d ':'\n" +
           "exit 0");
 
-      try {
-        data.put("headless-nodemanager.jar.base64", toBase64("/operator/bin/headless-nodemanager.jar"));
-      } catch (IOException e1) {
-        return doTerminate(e1, packet);
-      }
-      
       cm.setData(data);
 
       return cm;
