@@ -145,10 +145,11 @@ public class ConfigMapHelper {
           "if [ -f /tmp/weblogic-operator/bin/headless-nodemanager.jar ]; then\n" +
           "  echo \"Start the headless nodemanager and server instance\"\n" +
           "  if [ -n \"$4\" ]; then\n" +
-          "    echo \"Create boot.properties for managed server\"\n" +
+          "    echo \"Create boot.properties for managed server if necessary\"\n" +
           "    if [ ! -f /shared/domain/$domain_name/servers/$server_name/security/boot.properties ]; then\n" +
-          "      mkdir -p /shared/somain/$domain_name/servers/$server_name/security\n" +
+          "      createFolder /shared/domain/$domain_name/servers/$server_name/security\n" +
           "      cp /shared/domain/$domain_name/servers/$as_name/security/boot.properties /shared/domain/$domain_name/servers/$server_name/security/boot.properties\n" +
+          "      echo \"Copied boot.properties from /shared/domain/$domain_name/servers/$as_name/security to /shared/domain/$domain_name/servers/$server_name/security\"\n" +
           "    fi\n" +
           "  fi\n" +
           "  \n" +
