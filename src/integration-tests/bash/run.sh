@@ -2771,9 +2771,6 @@ function test_suite {
     # This test pass pairs with 'declare_new_test 1 define_operators_and_domains' above
     declare_test_pass
    
-test_first_operator oper1
-exit
- 
     trace 'Running mvn integration tests...'
     if [ "$WERCKER" = "true" ]; then
       test_mvn_integration_wercker
@@ -2783,6 +2780,9 @@ exit
       test_mvn_integration_local
     fi
 
+test_first_operator oper1
+exit
+ 
     # create and start first operator, manages namespaces default & test1
     test_first_operator oper1
 
