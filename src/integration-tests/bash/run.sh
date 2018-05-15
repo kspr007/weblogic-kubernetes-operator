@@ -532,6 +532,16 @@ function setup_jenkins {
     docker build -t "${IMAGE_NAME_OPERATOR}:${IMAGE_TAG_OPERATOR}" --no-cache=true .
 
     docker images
+
+    trace "Helm installation starts" 
+    wget -q -O  /tmp/helm-v2.7.2-linux-amd64.tar.gz https://kubernetes-helm.storage.googleapis.com/helm-v2.7.2-linux-amd64.tar.gz
+    mkdir /tmp/helm
+    tar xzf /tmp/helm-v2.7.2-linux-amd64.tar.gz -C /tmp/helm
+    chmod +x /tmp/helm/linux-amd64/helm
+    /usr/local/packages/aime/ias/run_as_root "cp /tmp/helm/linux-amd64/helm /usr/bin/"
+    rm -rf /tmp/helm
+    helm init
+    trace "Helm is configured."
 }
 
 # setup_local is for arbitrary dev hosted linux - it assumes docker & k8s are already installed
@@ -617,13 +627,14 @@ function create_image_pull_secret_wercker {
 #
 
 function op_define {
-    if [ "$#" != 4 ] ; then
-      fail "requires 4 parameters: OP_KEY NAMESPACE TARGET_NAMESPACES EXTERNAL_REST_HTTPSPORT"
+    if [ "$#" != 5 ] ; then
+      fail "requires 5 parameters: OP_KEY NAMESPACE TARGET_NAMESPACES EXTERNAL_REST_HTTPSPORT USE_HELM"
     fi
     local opkey="`echo \"${1?}\" | sed 's/-/_/g'`"
     eval export OP_${opkey}_NAMESPACE="$2"
     eval export OP_${opkey}_TARGET_NAMESPACES="$3"
     eval export OP_${opkey}_EXTERNAL_REST_HTTPSPORT="$4"
+    eval export OP_${opkey}_USE_HELM="$5"
 
     # generated TMP_DIR for operator = $USER_PROJECTS_DIR/weblogic-operators/$NAMESPACE :
     eval export OP_${opkey}_TMP_DIR="$USER_PROJECTS_DIR/weblogic-operators/$2"
@@ -644,6 +655,34 @@ function op_echo_all {
     env | grep "^OP_${opkey}_"
 }
 
+function operator_ready_wait {
+    if [ "$#" != 1 ] ; then
+      fail "requires 1 parameter: operatorKey"
+    fi
+    local OP_KEY=${1}
+    local OPERATOR_NS="`op_get $OP_KEY NAMESPACE`"
+    local TMP_DIR="`op_get $OP_KEY TMP_DIR`"
+
+    local namespace=$OPERATOR_NS
+    trace Waiting for operator deployment to be ready...
+    local AVAILABLE="0"
+    local max=30
+    local count=0
+    while [ "$AVAILABLE" != "1" -a $count -lt $max ] ; do
+        sleep 10
+        local AVAILABLE=`kubectl get deploy weblogic-operator -n $namespace -o jsonpath='{.status.availableReplicas}'`
+        trace "status is $AVAILABLE, iteration $count of $max"
+        local count=`expr $count + 1`
+    done
+
+    if [ "$AVAILABLE" != "1" ]; then
+        kubectl get deploy weblogic-operator -n ${namespace}
+        kubectl describe deploy weblogic-operator -n ${namespace}
+        kubectl describe pods -n ${namespace}
+        fail "The WebLogic operator deployment is not available, after waiting 300 seconds"
+    fi
+}
+
 function deploy_operator {
     if [ "$#" != 1 ] ; then
       fail "requires 1 parameter: opkey"
@@ -654,36 +693,54 @@ function deploy_operator {
     local TARGET_NAMESPACES="`op_get $opkey TARGET_NAMESPACES`"
     local EXTERNAL_REST_HTTPSPORT="`op_get $opkey EXTERNAL_REST_HTTPSPORT`"
     local TMP_DIR="`op_get $opkey TMP_DIR`"
+    local USE_HELM="`op_get $opkey USE_HELM`"
 
     if [ "$WERCKER" = "true" ]; then 
       create_image_pull_secret_wercker $NAMESPACE
     fi
 
     trace 'customize the yaml'
-    local inputs="$TMP_DIR/create-weblogic-operator-inputs.yaml"
     mkdir -p $TMP_DIR
-    cp $PROJECT_ROOT/kubernetes/create-weblogic-operator-inputs.yaml $inputs
+    if [ "$USE_HELM" = "true" ]; then
+      TARGET_NAMESPACES="\"$(sed 's/,/","/g' <<< "${TARGET_NAMESPACES}")\""
+      TARGET_NAMESPACES="[ ${TARGET_NAMESPACES} ]"
+      echo "TARGET_NAMESPACES is ${TARGET_NAMESPACES}"
+      local inputs="$TMP_DIR/weblogic-operator-values.yaml"
+      # generate certificates
+      $PROJECT_ROOT/kubernetes/helm-charts/create-helm-certificates.sh ${NAMESPACE} DNS:${NODEPORT_HOST} $PROJECT_ROOT/kubernetes/helm-charts/weblogic-operator/values-template.yaml $inputs
+    else
+      local inputs="$TMP_DIR/create-weblogic-operator-inputs.yaml"
+      cp $PROJECT_ROOT/kubernetes/create-weblogic-operator-inputs.yaml $inputs
+    fi
 
     trace 'customize the inputs yaml file to use our pre-built docker image'
-    sed -i -e "s|\(weblogicOperatorImagePullPolicy:\).*|\1${IMAGE_PULL_POLICY_OPERATOR}|g" $inputs
-    sed -i -e "s|\(weblogicOperatorImage:\).*|\1${IMAGE_NAME_OPERATOR}:${IMAGE_TAG_OPERATOR}|g" $inputs
+    sed -i -e "s|\(weblogicOperatorImagePullPolicy:\).*|\1 ${IMAGE_PULL_POLICY_OPERATOR}|g" $inputs
+    sed -i -e "s|\(weblogicOperatorImage:\).*|\1 ${IMAGE_NAME_OPERATOR}:${IMAGE_TAG_OPERATOR}|g" $inputs
     if [ -n "${IMAGE_PULL_SECRET_OPERATOR}" ]; then
       sed -i -e "s|#weblogicOperatorImagePullSecretName:.*|weblogicOperatorImagePullSecretName: ${IMAGE_PULL_SECRET_OPERATOR}|g" $inputs
     fi
     trace 'customize the inputs yaml file to generate a self-signed cert for the external Operator REST https port'
-    sed -i -e "s|\(externalRestOption:\).*|\1SELF_SIGNED_CERT|g" $inputs
-    sed -i -e "s|\(externalSans:\).*|\1DNS:${NODEPORT_HOST}|g" $inputs
+    sed -i -e "s|\(externalRestOption:\).*|\1 SELF_SIGNED_CERT|g" $inputs
+    sed -i -e "s|\(externalSans:\).*|\1 DNS:${NODEPORT_HOST}|g" $inputs
     trace 'customize the inputs yaml file to set the java logging level to FINER'
-    sed -i -e "s|\(javaLoggingLevel:\).*|\1FINER|g" $inputs
-    sed -i -e "s|\(externalRestHttpsPort:\).*|\1${EXTERNAL_REST_HTTPSPORT}|g" $inputs
+    sed -i -e "s|\(javaLoggingLevel:\).*|\1 FINER|g" $inputs
+    sed -i -e "s|\(externalRestHttpsPort:\).*|\1 ${EXTERNAL_REST_HTTPSPORT}|g" $inputs
     trace 'customize the inputs yaml file to add test namespace' 
     sed -i -e "s/^namespace:.*/namespace: ${NAMESPACE}/" $inputs
     sed -i -e "s/^targetNamespaces:.*/targetNamespaces: ${TARGET_NAMESPACES}/" $inputs
     sed -i -e "s/^serviceAccount:.*/serviceAccount: weblogic-operator/" $inputs
 
     local outfile="${TMP_DIR}/create-weblogic-operator.sh.out"
-    trace "Run the script to deploy the weblogic operator, see \"$outfile\" for tracking."
-    sh $PROJECT_ROOT/kubernetes/create-weblogic-operator.sh -i $inputs -o $USER_PROJECTS_DIR > ${outfile} 2>&1
+    if [ "$USE_HELM" = "true" ]; then
+      trace "Run helm install to deploy the weblogic operator, see \"$outfile\" for tracking."
+      cd $PROJECT_ROOT/kubernetes/helm-charts
+      helm install weblogic-operator --name ${NAMESPACE} -f $inputs --namespace ${NAMESPACE} > ${outfile} 2>&1
+      operator_ready_wait $opkey
+    else
+      trace "Run the script to deploy the weblogic operator, see \"$outfile\" for tracking."
+      sh $PROJECT_ROOT/kubernetes/create-weblogic-operator.sh -i $inputs -o $USER_PROJECTS_DIR > ${outfile} 2>&1
+    fi
+
     if [ "$?" = "0" ]; then
        # Prepend "+" to detailed debugging to make it easy to filter out
        cat ${outfile} | sed 's/^/+/g'
@@ -1380,6 +1437,7 @@ function call_operator_rest {
     local OP_KEY=${1}
     local OPERATOR_NS="`op_get $OP_KEY NAMESPACE`"
     local OPERATOR_TMP_DIR="`op_get $OP_KEY TMP_DIR`"
+    local USE_HELM="`op_get $OP_KEY USE_HELM`"
     local URL_TAIL="${2}"
 
     trace "URL_TAIL=$URL_TAIL"
@@ -1399,7 +1457,11 @@ function call_operator_rest {
     local SECRET="`kubectl get serviceaccount weblogic-operator -n $OPERATOR_NS -o jsonpath='{.secrets[0].name}'`"
     local ENCODED_TOKEN="`kubectl get secret ${SECRET} -n $OPERATOR_NS -o jsonpath='{.data.token}'`"
     local TOKEN="`echo ${ENCODED_TOKEN} | base64 --decode`"
-    local OPERATOR_CERT_DATA="`grep externalOperatorCert ${OPERATOR_TMP_DIR}/weblogic-operator.yaml | awk '{ print $2 }'`"
+    if [ "$USE_HELM" = "true" ]; then
+      local OPERATOR_CERT_DATA="`grep externalOperatorCert: ${OPERATOR_TMP_DIR}/weblogic-operator-values.yaml | awk '{ print $2 }'`"
+    else
+      local OPERATOR_CERT_DATA="`grep externalOperatorCert ${OPERATOR_TMP_DIR}/weblogic-operator.yaml | awk '{ print $2 }'`"
+    fi
     local OPERATOR_CERT_FILE="${OPERATOR_TMP_DIR}/operator.cert.pem"
     echo ${OPERATOR_CERT_DATA} | base64 --decode > ${OPERATOR_CERT_FILE}
 
@@ -2271,24 +2333,9 @@ function startup_operator {
 
     kubectl create -f $TMP_DIR/weblogic-operator.yaml
 
-    local namespace=$OPERATOR_NS
-    trace Waiting for operator deployment to be ready...
-    local AVAILABLE="0"
-    local max=30
-    local count=0
-    while [ "$AVAILABLE" != "1" -a $count -lt $max ] ; do
-        sleep 10
-        local AVAILABLE=`kubectl get deploy weblogic-operator -n $namespace -o jsonpath='{.status.availableReplicas}'`
-        trace "status is $AVAILABLE, iteration $count of $max"
-        local count=`expr $count + 1`
-    done
+    operator_ready_wait $OP_KEY
 
-    if [ "$AVAILABLE" != "1" ]; then
-        kubectl get deploy weblogic-operator -n ${namespace}
-        kubectl describe deploy weblogic-operator -n ${namespace}
-        kubectl describe pods -n ${namespace}
-        fail "The WebLogic operator deployment is not available, after waiting 300 seconds"
-    fi
+    local namespace=$OPERATOR_NS
 
     trace "Checking the operator pods"
     local REPLICA_SET=`kubectl describe deploy weblogic-operator -n ${namespace} | grep NewReplicaSet: | awk ' { print $2; }'`
@@ -2704,9 +2751,9 @@ function test_suite {
     
     declare_new_test 1 define_operators_and_domains
 
-    #          OP_KEY  NAMESPACE            TARGET_NAMESPACES  EXTERNAL_REST_HTTPSPORT
-    op_define  oper1   weblogic-operator-1  "default,test1"    31001
-    op_define  oper2   weblogic-operator-2  test2              32001
+    #          OP_KEY  NAMESPACE            TARGET_NAMESPACES  EXTERNAL_REST_HTTPSPORT  USE_HELM
+    op_define  oper1   weblogic-operator-1  "default,test1"    31001                    true
+    op_define  oper2   weblogic-operator-2  test2              32001                    false
 
     #          DOM_KEY  OP_KEY  NAMESPACE DOMAIN_UID STARTUP_CONTROL WL_CLUSTER_NAME WL_CLUSTER_TYPE  MS_BASE_NAME   ADMIN_PORT ADMIN_WLST_PORT ADMIN_NODE_PORT MS_PORT LOAD_BALANCER_WEB_PORT LOAD_BALANCER_DASHBOARD_PORT
     dom_define domain1  oper1   default   domain1    AUTO            cluster-1       DYNAMIC          managed-server 7001       30012           30701           8001    30305                  30315
@@ -2723,7 +2770,10 @@ function test_suite {
 
     # This test pass pairs with 'declare_new_test 1 define_operators_and_domains' above
     declare_test_pass
-    
+   
+test_first_operator oper1
+exit
+ 
     trace 'Running mvn integration tests...'
     if [ "$WERCKER" = "true" ]; then
       test_mvn_integration_wercker
