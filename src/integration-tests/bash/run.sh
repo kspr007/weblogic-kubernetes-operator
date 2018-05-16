@@ -627,14 +627,13 @@ function create_image_pull_secret_wercker {
 #
 
 function op_define {
-    if [ "$#" != 5 ] ; then
-      fail "requires 5 parameters: OP_KEY NAMESPACE TARGET_NAMESPACES EXTERNAL_REST_HTTPSPORT USE_HELM"
+    if [ "$#" != 4 ] ; then
+      fail "requires 4 parameters: OP_KEY NAMESPACE TARGET_NAMESPACES EXTERNAL_REST_HTTPSPORT "
     fi
     local opkey="`echo \"${1?}\" | sed 's/-/_/g'`"
     eval export OP_${opkey}_NAMESPACE="$2"
     eval export OP_${opkey}_TARGET_NAMESPACES="$3"
     eval export OP_${opkey}_EXTERNAL_REST_HTTPSPORT="$4"
-    eval export OP_${opkey}_USE_HELM="$5"
 
     # generated TMP_DIR for operator = $USER_PROJECTS_DIR/weblogic-operators/$NAMESPACE :
     eval export OP_${opkey}_TMP_DIR="$USER_PROJECTS_DIR/weblogic-operators/$2"
@@ -693,7 +692,6 @@ function deploy_operator {
     local TARGET_NAMESPACES="`op_get $opkey TARGET_NAMESPACES`"
     local EXTERNAL_REST_HTTPSPORT="`op_get $opkey EXTERNAL_REST_HTTPSPORT`"
     local TMP_DIR="`op_get $opkey TMP_DIR`"
-    local USE_HELM="`op_get $opkey USE_HELM`"
 
     if [ "$WERCKER" = "true" ]; then 
       create_image_pull_secret_wercker $NAMESPACE
@@ -814,7 +812,7 @@ function test_second_operator {
 #
 function dom_define {
     if [ "$#" != 14 ] ; then
-      fail "requires 14 parameters: DOM_KEY OP_KEY NAMESPACE DOMAIN_UID STARTUP_CONTROL WL_CLUSTER_NAME WL_CLUSTER_TYPE MS_BASE_NAME ADMIN_PORT ADMIN_WLST_PORT ADMIN_NODE_PORT MS_PORT LOAD_BALANCER_WEB_PORT LOAD_BALANCER_DASHBOARD_PORT"
+      fail "requires 14 parameters: DOM_KEY OP_KEY NAMESPACE DOMAIN_UID STARTUP_CONTROL WL_CLUSTER_NAME WL_CLUSTER_TYPE MS_BASE_NAME ADMIN_PORT ADMIN_WLST_PORT ADMIN_NODE_PORT MS_PORT LOAD_BALANCER_WEB_PORT LOAD_BALANCER_DASHBOARD_PORT "
     fi
     local DOM_KEY="`echo \"${1}\" | sed 's/-/_/g'`"
     eval export DOM_${DOM_KEY}_OP_KEY="$2"
@@ -1438,7 +1436,6 @@ function call_operator_rest {
     local OP_KEY=${1}
     local OPERATOR_NS="`op_get $OP_KEY NAMESPACE`"
     local OPERATOR_TMP_DIR="`op_get $OP_KEY TMP_DIR`"
-    local USE_HELM="`op_get $OP_KEY USE_HELM`"
     local URL_TAIL="${2}"
 
     trace "URL_TAIL=$URL_TAIL"
@@ -1654,6 +1651,11 @@ function test_mvn_integration_local {
 
     local mstart=`date +%s`
     mvn -P integration-tests clean install > $RESULT_DIR/mvn.out 2>&1
+    # Clean up clusteroles created by mvn build 
+    kubectl delete clusterrole weblogic-operator-cluster-role-nonresource
+    kubectl delete clusterrole weblogic-operator-cluster-role
+    kubectl delete clusterrole weblogic-operator-namespace-role
+
     local mend=`date +%s`
     local msecs=$((mend-mstart))
     trace "mvn complete, runtime $msecs seconds"
@@ -2312,7 +2314,6 @@ function shutdown_operator {
     local OP_KEY=${1}
     local OPERATOR_NS="`op_get $OP_KEY NAMESPACE`"
     local TMP_DIR="`op_get $OP_KEY TMP_DIR`"
-    local USE_HELM="`op_get $OP_KEY USE_HELM`"
 
     if [ "$USE_HELM" = "true" ]; then
       helm delete $OPERATOR_NS 
@@ -2758,10 +2759,9 @@ function test_suite {
     
     declare_new_test 1 define_operators_and_domains
 
-    #          OP_KEY  NAMESPACE            TARGET_NAMESPACES  EXTERNAL_REST_HTTPSPORT  USE_HELM
-    op_define  oper1   weblogic-operator-1  "default,test1"    31001                    false
-    op_define  oper2   weblogic-operator-2  test2              32001                    false
-    op_define  oper3   weblogic-operator-3  "test3,test4"      32101                    true
+    #          OP_KEY  NAMESPACE            TARGET_NAMESPACES  EXTERNAL_REST_HTTPSPORT 
+    op_define  oper1   weblogic-operator-1  "default,test1"    31001 
+    op_define  oper2   weblogic-operator-2  test2              32001 
 
     #          DOM_KEY  OP_KEY  NAMESPACE DOMAIN_UID STARTUP_CONTROL WL_CLUSTER_NAME WL_CLUSTER_TYPE  MS_BASE_NAME   ADMIN_PORT ADMIN_WLST_PORT ADMIN_NODE_PORT MS_PORT LOAD_BALANCER_WEB_PORT LOAD_BALANCER_DASHBOARD_PORT
     dom_define domain1  oper1   default   domain1    AUTO            cluster-1       DYNAMIC          managed-server 7001       30012           30701           8001    30305                  30315
@@ -2788,14 +2788,16 @@ function test_suite {
       test_mvn_integration_jenkins
     else
       test_mvn_integration_local
-test_first_operator oper3
-shutdown_operator oper3
+USE_HELM="true"
+test_first_operator oper1
+shutdown_operator oper1
 exit
     fi
 
-test_first_operator oper3
-shutdown_operator oper3
-
+USE_HELM="true"
+test_first_operator oper1
+shutdown_operator oper1
+USE_HELM="false"
  
     # create and start first operator, manages namespaces default & test1
     test_first_operator oper1
