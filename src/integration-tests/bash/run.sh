@@ -2752,8 +2752,9 @@ function test_suite {
     declare_new_test 1 define_operators_and_domains
 
     #          OP_KEY  NAMESPACE            TARGET_NAMESPACES  EXTERNAL_REST_HTTPSPORT  USE_HELM
-    op_define  oper1   weblogic-operator-1  "default,test1"    31001                    true
+    op_define  oper1   weblogic-operator-1  "default,test1"    31001                    false
     op_define  oper2   weblogic-operator-2  test2              32001                    false
+    op_define  oper3   weblogic-operator-3  "test3,test4"      32101                    true
 
     #          DOM_KEY  OP_KEY  NAMESPACE DOMAIN_UID STARTUP_CONTROL WL_CLUSTER_NAME WL_CLUSTER_TYPE  MS_BASE_NAME   ADMIN_PORT ADMIN_WLST_PORT ADMIN_NODE_PORT MS_PORT LOAD_BALANCER_WEB_PORT LOAD_BALANCER_DASHBOARD_PORT
     dom_define domain1  oper1   default   domain1    AUTO            cluster-1       DYNAMIC          managed-server 7001       30012           30701           8001    30305                  30315
@@ -2767,6 +2768,8 @@ function test_suite {
     # TODO have the op_define commands themselves create target namespace if it doesn't already exist, or test if the namespace creation is needed in the first place, and if so, ask MikeG to create them as part of domain create job
     kubectl create namespace test1 2>&1 | sed 's/^/+/g' 
     kubectl create namespace test2 2>&1 | sed 's/^/+/g' 
+    kubectl create namespace test3 2>&1 | sed 's/^/+/g' 
+    kubectl create namespace test4 2>&1 | sed 's/^/+/g' 
 
     # This test pass pairs with 'declare_new_test 1 define_operators_and_domains' above
     declare_test_pass
@@ -2777,11 +2780,11 @@ function test_suite {
     elif [ "$JENKINS" = "true" ]; then
       test_mvn_integration_jenkins
     else
+test_first_operator oper3
+exit
       test_mvn_integration_local
     fi
 
-test_first_operator oper1
-exit
  
     # create and start first operator, manages namespaces default & test1
     test_first_operator oper1
@@ -2844,6 +2847,8 @@ exit
 
       # test that create domain fails when its pv is already populated by a shutdown domain
       test_create_domain_on_exist_dir domain1
+
+test_first_operator oper3
 
     fi 
 
