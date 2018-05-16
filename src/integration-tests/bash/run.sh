@@ -2787,11 +2787,14 @@ function test_suite {
     elif [ "$JENKINS" = "true" ]; then
       test_mvn_integration_jenkins
     else
+      test_mvn_integration_local
 test_first_operator oper3
 shutdown_operator oper3
 exit
-      test_mvn_integration_local
     fi
+
+test_first_operator oper3
+shutdown_operator oper3
 
  
     # create and start first operator, manages namespaces default & test1
@@ -2815,9 +2818,6 @@ exit
     # if QUICKTEST is true skip the rest of the tests
     if [ ! "${QUICKTEST:-false}" = "true" ]; then
    
-test_first_operator oper3
-shutdown_operator oper3
-
       # create another domain in the default namespace and verify it
       test_domain_creation domain2 
     
