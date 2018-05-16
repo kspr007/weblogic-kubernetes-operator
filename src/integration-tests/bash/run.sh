@@ -730,13 +730,14 @@ function deploy_operator {
     sed -i -e "s/^targetNamespaces:.*/targetNamespaces: ${TARGET_NAMESPACES}/" $inputs
     sed -i -e "s/^serviceAccount:.*/serviceAccount: weblogic-operator/" $inputs
 
-    local outfile="${TMP_DIR}/create-weblogic-operator.sh.out"
     if [ "$USE_HELM" = "true" ]; then
+      local outfile="${TMP_DIR}/create-weblogic-operator-helm.out"
       trace "Run helm install to deploy the weblogic operator, see \"$outfile\" for tracking."
       cd $PROJECT_ROOT/kubernetes/helm-charts
       helm install weblogic-operator --name ${NAMESPACE} -f $inputs --namespace ${NAMESPACE} > ${outfile} 2>&1
       operator_ready_wait $opkey
     else
+      local outfile="${TMP_DIR}/create-weblogic-operator.sh.out"
       trace "Run the script to deploy the weblogic operator, see \"$outfile\" for tracking."
       sh $PROJECT_ROOT/kubernetes/create-weblogic-operator.sh -i $inputs -o $USER_PROJECTS_DIR > ${outfile} 2>&1
     fi
@@ -2311,8 +2312,14 @@ function shutdown_operator {
     local OP_KEY=${1}
     local OPERATOR_NS="`op_get $OP_KEY NAMESPACE`"
     local TMP_DIR="`op_get $OP_KEY TMP_DIR`"
+    local USE_HELM="`op_get $OP_KEY USE_HELM`"
 
-    kubectl delete -f $TMP_DIR/weblogic-operator.yaml
+    if [ "$USE_HELM" = "true" ]; then
+      helm delete $OPERATOR_NS 
+    else
+      kubectl delete -f $TMP_DIR/weblogic-operator.yaml
+    fi
+
     trace "Checking REST service is deleted"
     set +x
     local servicenum=`kubectl get services -n $OPERATOR_NS | egrep weblogic-operator-svc | wc -l`
@@ -2781,6 +2788,7 @@ function test_suite {
       test_mvn_integration_jenkins
     else
 test_first_operator oper3
+shutdown_operator oper3
 exit
       test_mvn_integration_local
     fi
@@ -2807,6 +2815,9 @@ exit
     # if QUICKTEST is true skip the rest of the tests
     if [ ! "${QUICKTEST:-false}" = "true" ]; then
    
+test_first_operator oper3
+shutdown_operator oper3
+
       # create another domain in the default namespace and verify it
       test_domain_creation domain2 
     
@@ -2847,8 +2858,6 @@ exit
 
       # test that create domain fails when its pv is already populated by a shutdown domain
       test_create_domain_on_exist_dir domain1
-
-test_first_operator oper3
 
     fi 
 
