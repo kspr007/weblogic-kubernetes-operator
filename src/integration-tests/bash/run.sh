@@ -887,8 +887,13 @@ function run_create_domain_job {
     local WEBLOGIC_CREDENTIALS_FILE="${tmp_dir}/weblogic-credentials.yaml"
 
     # Common inputs file for creating a domain
-    local inputs="$tmp_dir/create-weblogic-domain-inputs.yaml"
-    cp $PROJECT_ROOT/kubernetes/create-weblogic-domain-inputs.yaml $inputs
+    if [ "$USE_HELM" = "true" ]; then
+      local inputs=$tmp_dir/weblogic-operator-values.yaml
+      cp $PROJECT_ROOT/kubernetes/helm-charts/weblogic-domain/values.yaml $inputs
+    else
+      local inputs="$tmp_dir/create-weblogic-domain-inputs.yaml"
+      cp $PROJECT_ROOT/kubernetes/create-weblogic-domain-inputs.yaml $inputs
+    fi
 
     # accept the default domain name (i.e. don't customize it)
     local domain_name=`egrep 'domainName' $inputs | awk '{print $2}'`
@@ -974,9 +979,17 @@ function run_create_domain_job {
     fi
 
     local outfile="${tmp_dir}/create-weblogic-domain.sh.out"
-    trace "Run the script to create the domain, see \"$outfile\" for tracing."
 
-    sh $PROJECT_ROOT/kubernetes/create-weblogic-domain.sh -i $inputs -o $USER_PROJECTS_DIR > ${outfile} 2>&1
+
+    if [ "$USE_HELM" = "true" ]; then
+      trace "Run helm install to create the domain, see \"$outfile\" for tracing."
+      cd $PROJECT_ROOT/kubernetes/helm-charts
+      helm install weblogic-domain --name $1 -f $inputs --namespace ${NAMESPACE} > ${outfile} 2>&1
+    else
+      trace "Run the script to create the domain, see \"$outfile\" for tracing."
+
+      sh $PROJECT_ROOT/kubernetes/create-weblogic-domain.sh -i $inputs -o $USER_PROJECTS_DIR > ${outfile} 2>&1
+    fi
 
     if [ "$?" = "0" ]; then
        cat ${outfile} | sed 's/^/+/g'
@@ -2251,7 +2264,13 @@ function shutdown_domain {
 
     local replicas=`get_cluster_replicas $DOM_KEY`
 
-    kubectl delete -f ${TMP_DIR}/domain-custom-resource.yaml
+    if [ "$USE_HELM" = "true" ]; then
+      echo "calling helm delete ${DOM_KEY} --purge"
+      helm delete ${DOM_KEY} --purge
+    else
+      kubectl delete -f ${TMP_DIR}/domain-custom-resource.yaml
+    fi
+
     verify_domain_deleted $DOM_KEY $replicas
     trace Done. 
 }
@@ -2264,8 +2283,15 @@ function startup_domain {
     local DOM_KEY="$1"
 
     local TMP_DIR="`dom_get $1 TMP_DIR`"
+    local NAMESPACE="`dom_get $1 NAMESPACE`"
 
-    kubectl create -f ${TMP_DIR}/domain-custom-resource.yaml
+    if [ "$USE_HELM" = "true" ]; then
+      local inputs=$TMP_DIR/weblogic-operator-values.yaml
+      cd $PROJECT_ROOT/kubernetes/helm-charts
+      helm install weblogic-domain --name ${DOM_KEY} -f $inputs --namespace ${NAMESPACE} --set createWeblogicDomain=false
+    else   
+      kubectl create -f ${TMP_DIR}/domain-custom-resource.yaml
+    fi
 
     verify_domain_created $DOM_KEY 
 }
@@ -2316,7 +2342,7 @@ function shutdown_operator {
     local TMP_DIR="`op_get $OP_KEY TMP_DIR`"
 
     if [ "$USE_HELM" = "true" ]; then
-      helm delete $OPERATOR_NS 
+      helm delete $OPERATOR_NS --purge
     else
       kubectl delete -f $TMP_DIR/weblogic-operator.yaml
     fi
@@ -2339,7 +2365,12 @@ function startup_operator {
     local OPERATOR_NS="`op_get $OP_KEY NAMESPACE`"
     local TMP_DIR="`op_get $OP_KEY TMP_DIR`"
 
-    kubectl create -f $TMP_DIR/weblogic-operator.yaml
+    if [ "$USE_HELM" = "true" ]; then
+      local inputs="$TMP_DIR/weblogic-operator-values.yaml"
+      helm install weblogic-operator --name ${OPERATOR_NS} -f $inputs --namespace ${OPERATOR_NS}
+    else
+      kubectl create -f $TMP_DIR/weblogic-operator.yaml
+    fi
 
     operator_ready_wait $OP_KEY
 
@@ -2788,17 +2819,25 @@ function test_suite {
       test_mvn_integration_jenkins
     else
       test_mvn_integration_local
-USE_HELM="true"
-test_first_operator oper1
-shutdown_operator oper1
-exit
     fi
 
-USE_HELM="true"
-test_first_operator oper1
-shutdown_operator oper1
-USE_HELM="false"
- 
+    # Test installation using helm charts
+    # if QUICKTEST is true skip the helm tests
+    #
+    if [ ! "${QUICKTEST:-false}" = "true" ]; then
+      if ! [ -x "$(command -v helm)" ]; then
+        trace 'helm is not installed. Skipping helm charts tests'
+      else
+        USE_HELM="true"
+        test_first_operator oper1
+        test_domain_creation domain1 
+        test_domain_lifecycle domain1 
+        test_operator_lifecycle domain1
+        shutdown_operator oper1
+        USE_HELM="false"
+      fi
+    fi
+
     # create and start first operator, manages namespaces default & test1
     test_first_operator oper1
 
